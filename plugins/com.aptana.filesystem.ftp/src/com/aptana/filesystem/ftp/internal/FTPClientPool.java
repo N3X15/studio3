@@ -8,6 +8,9 @@
 
 package com.aptana.filesystem.ftp.internal;
 
+import java.util.Map;
+import java.util.WeakHashMap;
+
 import org.eclipse.core.runtime.Platform;
 
 import com.aptana.core.util.KeepAliveObjectPool;
@@ -19,6 +22,9 @@ import com.enterprisedt.net.ftp.FTPClientInterface;
 import com.enterprisedt.net.ftp.FTPTransferType;
 
 public final class FTPClientPool extends KeepAliveObjectPool<FTPClientInterface> {
+
+	// N3X: Keep connection pools so we don't have to re-init every fucking time.
+	protected static Map<String,FTPClientPool> pools = new WeakHashMap<String,FTPClientPool>();
 
 	private IPoolConnectionManager manager;
 
@@ -62,5 +68,26 @@ public final class FTPClientPool extends KeepAliveObjectPool<FTPClientInterface>
 			}
 		}
 		return true;
+	}
+
+	/**
+	 * Less connection spam.
+	 * 
+	 * @param fileMan Manager checking out this pool
+	 * @return
+	 */
+	public static FTPClientPool checkoutPool(FTPConnectionFileManager fileMan)
+	{
+		StringBuilder sb = new StringBuilder();
+		sb.append(fileMan.login);
+		sb.append("@");
+		sb.append(fileMan.host);
+		sb.append(":");
+		sb.append(fileMan.port);
+		String poolKey=sb.toString();
+		if(!pools.containsKey(poolKey)) {
+			pools.put(poolKey,new FTPClientPool(fileMan));
+		}
+		return pools.get(poolKey);
 	}
 }

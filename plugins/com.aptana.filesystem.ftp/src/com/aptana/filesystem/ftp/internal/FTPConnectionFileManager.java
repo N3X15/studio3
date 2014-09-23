@@ -31,6 +31,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.TimeZone;
+import java.util.WeakHashMap;
 import java.util.regex.Matcher;
 
 import org.eclipse.core.filesystem.EFS;
@@ -101,7 +102,8 @@ public class FTPConnectionFileManager extends BaseFTPConnectionFileManager imple
 	private long serverToLocalTimeZoneShift = Integer.MIN_VALUE;
 	protected boolean hasServerInfo;
 	protected PrintWriter messageLogWriter;
-
+	
+	// N3X: Pool loaded is from FTPClientPool.pools.
 	protected FTPClientPool pool;
 
 	/*
@@ -116,8 +118,6 @@ public class FTPConnectionFileManager extends BaseFTPConnectionFileManager imple
 		Assert.isTrue(ftpClient == null, Messages.FTPConnectionFileManager_already_initialized);
 		try
 		{
-			this.pool = new FTPClientPool(this);
-			this.ftpClient = new ProFTPClient();
 			this.host = host;
 			this.port = port;
 			this.login = login;
@@ -126,7 +126,11 @@ public class FTPConnectionFileManager extends BaseFTPConnectionFileManager imple
 			this.authId = Policy.generateAuthId("FTP", login, host, port); //$NON-NLS-1$
 			this.transferType = transferType;
 			this.timezone = (timezone != null && timezone.length() == 0) ? null : timezone;
-			initFTPClient(ftpClient, passive, encoding);
+			this.pool = FTPClientPool.checkoutPool(this);
+			this.ftpClient = pool.checkOut();// N3X: new ProFTPClient();
+			if(!ftpClient.connected()) {
+				initFTPClient(ftpClient, passive, encoding);
+			}
 		}
 		catch (Exception e)
 		{
