@@ -76,8 +76,6 @@ public class FTPSConnectionFileManager extends FTPConnectionFileManager implemen
 	public void init(String host, int port, IPath basePath, String login, char[] password, boolean explicit, boolean passive, String transferType, String encoding, String timezone, boolean validateCertificate, boolean noSSLSessionResumption) {
 		Assert.isTrue(ftpClient == null, Messages.FTPSConnectionFileManager_ConnectionHasBeenInitiated);
 		try {
-			this.pool = new FTPClientPool(this);
-			ftpClient = newClient();
 			this.host = host;
 			this.port = port;
 			this.login = login;
@@ -88,7 +86,11 @@ public class FTPSConnectionFileManager extends FTPConnectionFileManager implemen
 			this.timezone = (timezone != null && timezone.length() == 0) ? null : timezone;
 			this.validateCertificate = validateCertificate;
 			this.noSSLSessionResumption = noSSLSessionResumption;
-			initFTPSClient((SSLFTPClient) ftpClient, explicit, passive, encoding, validateCertificate, noSSLSessionResumption);
+			
+			this.pool = FTPClientPool.checkoutPool(this); // N3X: new FTPClientPool(this);
+			ftpClient = this.pool.checkOut();
+			if(!ftpClient.connected())
+				initFTPSClient((SSLFTPClient) ftpClient, explicit, passive, encoding, validateCertificate, noSSLSessionResumption);
 		} catch (Exception e) {
 			SecureFTPPlugin.log(new Status(IStatus.WARNING, SecureFTPPlugin.PLUGIN_ID, Messages.FTPSConnectionFileManager_ConnectionInitializationFailed, e));
 			ftpClient = null;
