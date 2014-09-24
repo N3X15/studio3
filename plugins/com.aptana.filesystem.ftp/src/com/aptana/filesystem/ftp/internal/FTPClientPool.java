@@ -79,7 +79,7 @@ public final class FTPClientPool extends KeepAliveObjectPool<FTPClientInterface>
 	public static FTPClientPool checkoutPool(FTPConnectionFileManager fileMan)
 	{
 		StringBuilder sb = new StringBuilder();
-		sb.append(fileMan.login);
+		sb.append(fileMan.getLogin());
 		sb.append("@");
 		sb.append(fileMan.host);
 		sb.append(":");

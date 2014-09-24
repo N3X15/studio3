@@ -127,7 +127,7 @@ public class FTPConnectionFileManager extends BaseFTPConnectionFileManager imple
 			this.transferType = transferType;
 			this.timezone = (timezone != null && timezone.length() == 0) ? null : timezone;
 			this.pool = FTPClientPool.checkoutPool(this);
-			this.ftpClient = pool.checkOut();// N3X: new ProFTPClient();
+			this.ftpClient = (FTPClient)pool.checkOut();// N3X: new ProFTPClient();
 			if(!ftpClient.connected()) {
 				initFTPClient(ftpClient, passive, encoding);
 			}

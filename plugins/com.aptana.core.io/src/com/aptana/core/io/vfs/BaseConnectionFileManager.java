@@ -86,6 +86,10 @@ public abstract class BaseConnectionFileManager implements IConnectionFileManage
 			throw new OperationCanceledException();
 		}
 	}
+	
+	public String getLogin() {
+		return login;
+	}
 
 	protected final void getOrPromptPassword(String title, String message)
 	{
