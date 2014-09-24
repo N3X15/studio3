@@ -88,7 +88,7 @@ public class FTPSConnectionFileManager extends FTPConnectionFileManager implemen
 			this.noSSLSessionResumption = noSSLSessionResumption;
 			
 			this.pool = FTPClientPool.checkoutPool(this); // N3X: new FTPClientPool(this);
-			ftpClient = this.pool.checkOut();
+			ftpClient = (FTPClient)this.pool.checkOut();
 			if(!ftpClient.connected())
 				initFTPSClient((SSLFTPClient) ftpClient, explicit, passive, encoding, validateCertificate, noSSLSessionResumption);
 		} catch (Exception e) {
