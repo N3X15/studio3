@@ -48,6 +48,7 @@ import com.aptana.core.io.vfs.IExtendedFileStore;
 import com.aptana.core.util.ExpiringMap;
 import com.aptana.filesystem.ftp.Policy;
 import com.aptana.filesystem.ftp.internal.BaseFTPConnectionFileManager;
+import com.aptana.filesystem.ftp.internal.FTPClientPool;
 import com.aptana.filesystem.secureftp.ISFTPConnectionFileManager;
 import com.aptana.filesystem.secureftp.ISFTPConstants;
 import com.aptana.ide.core.io.ConnectionContext;
@@ -55,6 +56,7 @@ import com.aptana.ide.core.io.CoreIOPlugin;
 import com.aptana.ide.core.io.PermissionDeniedException;
 import com.aptana.ide.core.io.preferences.PermissionDirection;
 import com.aptana.ide.core.io.preferences.PreferenceUtils;
+import com.enterprisedt.net.ftp.FTPClient;
 import com.enterprisedt.net.ftp.FTPException;
 import com.enterprisedt.net.ftp.FTPFile;
 import com.enterprisedt.net.ftp.FTPTransferType;
@@ -81,6 +83,9 @@ public class SFTPConnectionFileManager extends BaseFTPConnectionFileManager impl
 	private Map<IPath, FTPFile> ftpFileCache = new ExpiringMap<IPath, FTPFile>(CACHE_TTL);
 
 	private Thread keepaliveThread;
+	
+	// N3X: Pool loaded is from FTPClientPool.pools.
+	protected FTPClientPool pool;
 
 	/*
 	 * (non-Javadoc)
@@ -94,7 +99,7 @@ public class SFTPConnectionFileManager extends BaseFTPConnectionFileManager impl
 		Assert.isTrue(ftpClient == null, Messages.SFTPConnectionFileManager_ConnectionHasBeenInitialized);
 		try
 		{
-			ftpClient = new SSHFTPClient();
+			//ftpClient = new SSHFTPClient();
 			this.host = host;
 			this.port = port;
 			this.keyFilePath = keyFilePath;
@@ -110,7 +115,11 @@ public class SFTPConnectionFileManager extends BaseFTPConnectionFileManager impl
 				this.authId = Policy.generateAuthId("SFTP", login, host, port); //$NON-NLS-1$
 			}
 			this.transferType = transferType;
-			initFTPClient(ftpClient, encoding, compression);
+			
+			this.pool = FTPClientPool.checkoutPool(this); // N3X: new FTPClientPool(this);
+			ftpClient = (SSHFTPClient)this.pool.checkOut();
+			if(!ftpClient.connected())
+				initFTPClient(ftpClient, encoding, compression);
 		}
 		catch (Exception e)
 		{
@@ -159,131 +168,136 @@ public class SFTPConnectionFileManager extends BaseFTPConnectionFileManager impl
 
 			ConnectionContext context = CoreIOPlugin.getConnectionContext(this);
 
-			monitor.beginTask(Messages.SFTPConnectionFileManager_EstablishingConnection, IProgressMonitor.UNKNOWN);
-			ftpClient.setRemoteHost(host);
-			ftpClient.setRemotePort(port);
-			while (true)
-			{
-				if (keyFilePath != null)
+			// N3X: Check for existing connection before re-authenticating.
+			if(!ftpClient.connected()) {
+				
+				monitor.beginTask(Messages.SFTPConnectionFileManager_EstablishingConnection, IProgressMonitor.UNKNOWN);
+				ftpClient.setRemoteHost(host);
+				ftpClient.setRemotePort(port);
+				while (true)
 				{
-					SshPrivateKeyFile privateKeyFile;
-					try
+					if (keyFilePath != null)
 					{
-						privateKeyFile = SshPrivateKeyFile.parse(keyFilePath.toFile());
-					}
-					catch (InvalidSshKeyException e)
-					{
-						throw new CoreException(new Status(Status.ERROR, SecureFTPPlugin.PLUGIN_ID,
-								MessageFormat.format(Messages.SFTPConnectionFileManager_InvalidPrivateKey,
-										keyFilePath.toOSString()), e));
-					}
-					catch (IOException e)
-					{
-						throw new CoreException(new Status(Status.ERROR, SecureFTPPlugin.PLUGIN_ID,
-								MessageFormat.format(Messages.SFTPConnectionFileManager_UnableToReadPrivateKey,
-										keyFilePath.toOSString())));
-					}
-					if (privateKeyFile.isPassphraseProtected() && password.length == 0)
-					{
-						if (context != null && context.getBoolean(ConnectionContext.NO_PASSWORD_PROMPT))
+						SshPrivateKeyFile privateKeyFile;
+						try
+						{
+							privateKeyFile = SshPrivateKeyFile.parse(keyFilePath.toFile());
+						}
+						catch (InvalidSshKeyException e)
+						{
+							throw new CoreException(new Status(Status.ERROR, SecureFTPPlugin.PLUGIN_ID,
+									MessageFormat.format(Messages.SFTPConnectionFileManager_InvalidPrivateKey,
+											keyFilePath.toOSString()), e));
+						}
+						catch (IOException e)
+						{
+							throw new CoreException(new Status(Status.ERROR, SecureFTPPlugin.PLUGIN_ID,
+									MessageFormat.format(Messages.SFTPConnectionFileManager_UnableToReadPrivateKey,
+											keyFilePath.toOSString())));
+						}
+						if (privateKeyFile.isPassphraseProtected() && password.length == 0)
+						{
+							if (context != null && context.getBoolean(ConnectionContext.NO_PASSWORD_PROMPT))
+							{
+								password = new char[0];
+							}
+							else
+							{
+								getOrPromptPassword(MessageFormat.format(
+										Messages.SFTPConnectionFileManager_PublicKeyAuthentication, new Object[] { host,
+												keyFilePath.toOSString() }),
+										Messages.SFTPConnectionFileManager_SpecifyPassphrase);
+								while (true)
+								{
+									try
+									{
+										privateKeyFile.toPrivateKey(String.copyValueOf(password));
+									}
+									catch (InvalidSshKeyException e)
+									{
+										if (e.getCause() instanceof NoSuchAlgorithmException)
+										{
+											SecureFTPPlugin.log(new Status(IStatus.WARNING, SecureFTPPlugin.PLUGIN_ID, e
+													.getCause().getMessage()));
+										}
+										promptPassword(MessageFormat.format(
+												Messages.SFTPConnectionFileManager_PublicKeyAuthentication, new Object[] {
+														host, keyFilePath.toOSString() }),
+												Messages.SFTPConnectionFileManager_PassphraseNotAccepted);
+										continue;
+									}
+									break;
+								}
+							}
+						}
+						else if (password == null)
 						{
 							password = new char[0];
 						}
-						else
+						try
 						{
-							getOrPromptPassword(MessageFormat.format(
-									Messages.SFTPConnectionFileManager_PublicKeyAuthentication, new Object[] { host,
-											keyFilePath.toOSString() }),
-									Messages.SFTPConnectionFileManager_SpecifyPassphrase);
-							while (true)
-							{
-								try
-								{
-									privateKeyFile.toPrivateKey(String.copyValueOf(password));
-								}
-								catch (InvalidSshKeyException e)
-								{
-									if (e.getCause() instanceof NoSuchAlgorithmException)
-									{
-										SecureFTPPlugin.log(new Status(IStatus.WARNING, SecureFTPPlugin.PLUGIN_ID, e
-												.getCause().getMessage()));
-									}
-									promptPassword(MessageFormat.format(
-											Messages.SFTPConnectionFileManager_PublicKeyAuthentication, new Object[] {
-													host, keyFilePath.toOSString() }),
-											Messages.SFTPConnectionFileManager_PassphraseNotAccepted);
-									continue;
-								}
-								break;
-							}
+							ftpClient.setAuthentication(keyFilePath.toOSString(), login, String.copyValueOf(password));
 						}
-					}
-					else if (password == null)
-					{
-						password = new char[0];
-					}
-					try
-					{
-						ftpClient.setAuthentication(keyFilePath.toOSString(), login, String.copyValueOf(password));
-					}
-					catch (InvalidSshKeyException e)
-					{
-						if (password.length == 0)
+						catch (InvalidSshKeyException e)
 						{
+							if (password.length == 0)
+							{
+								throw new CoreException(new Status(Status.ERROR, SecureFTPPlugin.PLUGIN_ID,
+										MessageFormat.format(Messages.SFTPConnectionFileManager_KeyRequirePassphrase,
+												keyFilePath.toOSString()), e));
+							}
 							throw new CoreException(new Status(Status.ERROR, SecureFTPPlugin.PLUGIN_ID,
-									MessageFormat.format(Messages.SFTPConnectionFileManager_KeyRequirePassphrase,
+									MessageFormat.format(Messages.SFTPConnectionFileManager_InvalidPassphrase,
 											keyFilePath.toOSString()), e));
 						}
-						throw new CoreException(new Status(Status.ERROR, SecureFTPPlugin.PLUGIN_ID,
-								MessageFormat.format(Messages.SFTPConnectionFileManager_InvalidPassphrase,
-										keyFilePath.toOSString()), e));
 					}
-				}
-				else
-				{
-					if (password.length == 0 && !ISFTPConstants.LOGIN_ANONYMOUS.equals(login)
-							&& (context == null || !context.getBoolean(ConnectionContext.NO_PASSWORD_PROMPT)))
+					else
 					{
-						getOrPromptPassword(
-								MessageFormat.format(Messages.SFTPConnectionFileManager_SFTPAuthentication, host),
-								Messages.SFTPConnectionFileManager_SpecifyPassword);
+						if (password.length == 0 && !ISFTPConstants.LOGIN_ANONYMOUS.equals(login)
+								&& (context == null || !context.getBoolean(ConnectionContext.NO_PASSWORD_PROMPT)))
+						{
+							getOrPromptPassword(
+									MessageFormat.format(Messages.SFTPConnectionFileManager_SFTPAuthentication, host),
+									Messages.SFTPConnectionFileManager_SpecifyPassword);
+						}
+						ftpClient.setAuthentication(login, String.copyValueOf(password));
 					}
-					ftpClient.setAuthentication(login, String.copyValueOf(password));
-				}
-				Policy.checkCanceled(monitor);
-				monitor.subTask(Messages.SFTPConnectionFileManager_Authenticating);
-				try
-				{
-					ftpClient.connect();
-				}
-				catch (SSHFTPException e)
-				{
 					Policy.checkCanceled(monitor);
-					if (keyFilePath != null)
+					monitor.subTask(Messages.SFTPConnectionFileManager_Authenticating);
+					try
 					{
-						throw new CoreException(new Status(Status.ERROR, SecureFTPPlugin.PLUGIN_ID,
-								MessageFormat.format(Messages.SFTPConnectionFileManager_FailedAuthenticatePublicKey,
-										e.getLocalizedMessage()), e));
+						ftpClient.connect();
 					}
-					if (context != null && context.getBoolean(ConnectionContext.NO_PASSWORD_PROMPT))
+					catch (SSHFTPException e)
 					{
-						throw new CoreException(new Status(Status.ERROR, SecureFTPPlugin.PLUGIN_ID,
-								MessageFormat.format(Messages.SFTPConnectionFileManager_FailedAuthenticate,
-										Messages.SFTPConnectionFileManager_IncorrectLogin), e));
+						Policy.checkCanceled(monitor);
+						if (keyFilePath != null)
+						{
+							throw new CoreException(new Status(Status.ERROR, SecureFTPPlugin.PLUGIN_ID,
+									MessageFormat.format(Messages.SFTPConnectionFileManager_FailedAuthenticatePublicKey,
+											e.getLocalizedMessage()), e));
+						}
+						if (context != null && context.getBoolean(ConnectionContext.NO_PASSWORD_PROMPT))
+						{
+							throw new CoreException(new Status(Status.ERROR, SecureFTPPlugin.PLUGIN_ID,
+									MessageFormat.format(Messages.SFTPConnectionFileManager_FailedAuthenticate,
+											Messages.SFTPConnectionFileManager_IncorrectLogin), e));
+						}
+						promptPassword(MessageFormat.format(Messages.SFTPConnectionFileManager_SFTPAuthentication, host),
+								Messages.SFTPConnectionFileManager_PasswordNotAccepted);
+						safeQuit();
+						continue;
 					}
-					promptPassword(MessageFormat.format(Messages.SFTPConnectionFileManager_SFTPAuthentication, host),
-							Messages.SFTPConnectionFileManager_PasswordNotAccepted);
-					safeQuit();
-					continue;
+					break;
 				}
-				break;
+				
+				Policy.checkCanceled(monitor);
 			}
-
-			Policy.checkCanceled(monitor);
 			changeCurrentDir(basePath);
 
 			ftpClient.setType(ISFTPConstants.TRANSFER_TYPE_ASCII.equals(transferType) ? FTPTransferType.ASCII
 					: FTPTransferType.BINARY);
+			
 			initKeepAlive();
 		}
 		catch (OperationCanceledException e)

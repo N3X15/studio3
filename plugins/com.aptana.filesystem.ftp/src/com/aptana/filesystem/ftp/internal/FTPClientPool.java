@@ -69,24 +69,29 @@ public final class FTPClientPool extends KeepAliveObjectPool<FTPClientInterface>
 		}
 		return true;
 	}
-
-	/**
-	 * Less connection spam.
-	 * 
-	 * @param fileMan Manager checking out this pool
-	 * @return
-	 */
-	public static FTPClientPool checkoutPool(FTPConnectionFileManager fileMan)
-	{
+	
+	public static String buildPoolKey(BaseFTPConnectionFileManager fileMan) {
 		StringBuilder sb = new StringBuilder();
 		sb.append(fileMan.getLogin());
 		sb.append("@");
 		sb.append(fileMan.host);
 		sb.append(":");
 		sb.append(fileMan.port);
-		String poolKey=sb.toString();
+		return sb.toString();
+	}
+
+	/**
+	 * Less connection spam.
+	 * 
+	 * @param fileMan Manager checking out this pool
+	 * @author Rob "N3X15" Nelson <nexisentertainment@gmail.com>
+	 * @return
+	 */
+	public static FTPClientPool checkoutPool(BaseFTPConnectionFileManager fileMan)
+	{
+		String poolKey = FTPClientPool.buildPoolKey(fileMan);
 		if(!pools.containsKey(poolKey)) {
-			pools.put(poolKey,new FTPClientPool(fileMan));
+			pools.put(poolKey,new FTPClientPool((IPoolConnectionManager) fileMan));
 		}
 		return pools.get(poolKey);
 	}
