@@ -2,7 +2,7 @@
 <feature
       id="com.aptana.feature"
       label="%featureName"
-      version="3.6.1.qualifier"
+      version="3.7.1.qualifier"
       provider-name="%providerName"
       plugin="com.aptana.branding">
 
@@ -718,13 +718,6 @@
 
    <plugin
          id="com.aptana.editor.html.core"
-         download-size="0"
-         install-size="0"
-         version="0.0.0"
-         unpack="false"/>
-
-   <plugin
-         id="net.jeeeyul.eclipse.themes"
          download-size="0"
          install-size="0"
          version="0.0.0"
